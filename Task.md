@@ -1,5 +1,5 @@
 # 1A
-## view_resource_consumption_daily
+## view_resource_consumption_hourly
 так как показания снимаются каждый час, то будем использовать функцию LAG, позволяющая получать предыдущую строку. Будем получать предыдущую строку по device_id и metric_type.code, записывать в поле prev_value и вычитать из текущего значения
 ```sql
 
@@ -40,4 +40,27 @@ SELECT
 		3
 	) AS value
 FROM base_cte;
+```
+## view_resource_consumption_daily
+Для получения данных за день будем использовать уже существующее представление view_resource_consumption_hourly. Будем группировать строки по дате (функция DATE() возвращает год, месяц и день) и суммировать данные из всех строк, за эти даты.
+```sql
+DROP VIEW IF EXISTS view_resource_consumption_daily;
+
+CREATE VIEW view_resource_consumption_daily AS
+SELECT
+    DATE(ts) AS date,
+    complex,
+    building,
+    apartment,
+    code,
+    unit,
+    ROUND(SUM(value), 3) AS value
+FROM view_resource_consumption_hourly
+GROUP BY
+    DATE(ts),
+    complex,
+    building,
+    apartment,
+    code,
+    unit;
 ```
