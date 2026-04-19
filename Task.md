@@ -112,5 +112,4 @@ JOIN power_cte pcte
     AND pcte.complex = mcte.complex 
     AND pcte.building = mcte.building
     AND pcte.apartment = mcte.apartment;
-    
 ```
