@@ -8,6 +8,7 @@ WITH base_cte AS (
 	SELECT
 		m.measurement_id,
 		m.ts,
+		b.building_id,
 		c.name AS complex,
 		b.name AS building,
 		d.apartment_id,
@@ -27,6 +28,7 @@ WITH base_cte AS (
 SELECT
 	measurement_id,
 	ts,
+	building_id,
 	complex,
 	building,
 	apartment_id,
@@ -50,8 +52,9 @@ DROP VIEW IF EXISTS view_resource_consumption_daily;
 CREATE VIEW view_resource_consumption_daily AS
 SELECT
     DATE(ts) AS date,
-    complex,
+    building_id,
     building,
+    complex,
     apartment_id,
     apartment_no,
     code,
@@ -61,6 +64,7 @@ FROM view_resource_consumption_hourly
 GROUP BY
     DATE(ts),
     complex,
+    building_id,
     building,
     apartment_id,
     apartment_no,
@@ -81,6 +85,7 @@ WITH delta_cte AS (
     SELECT
         ts,
         complex,
+        building_id,
         building,
         apartment_id,
         apartment_no,
@@ -92,6 +97,7 @@ WITH delta_cte AS (
 SELECT 
     ts,
     complex,
+    building_id,
     building,
     apartment_id,
     apartment_no,
@@ -110,6 +116,7 @@ CREATE VIEW view_motion_detect_by_apartment AS
 WITH base_cte AS (
     SELECT
         m.ts,
+        a.building_id,
         d.apartment_id,
         a.apartment_no,
         m.value_bool AS has_motion
@@ -121,6 +128,7 @@ WITH base_cte AS (
 )
 SELECT
     ts,
+    building_id,
     apartment_id,
     apartment_no,
     has_motion
@@ -133,6 +141,7 @@ DROP VIEW IF EXISTS view_danger_energy_with_no_motion_scen;
 CREATE VIEW view_danger_energy_with_no_motion_scen AS
 SELECT 
     venergy.ts,
+    venergy.building_id,
     venergy.building,
     venergy.complex,
     venergy.apartment_id,
@@ -144,7 +153,7 @@ SELECT
         ELSE 0
     END AS is_danger
 FROM view_energy_delta_percent_by_apartment venergy
-JOIN view_motion_detect_by_apartment vmotion ON vmotion.ts = venergy.ts AND vmotion.apartment_id = venergy.apartment_id
+JOIN view_motion_detect_by_apartment vmotion ON vmotion.ts = venergy.ts AND vmotion.apartment_id = venergy.apartment_id AND vmotion.building_id = venergy.building_id
 ```
 
 
@@ -154,3 +163,18 @@ JOIN view_motion_detect_by_apartment vmotion ON vmotion.ts = venergy.ts AND vmot
 2. Получаем дату и время последнего инцидента
 3. Проходимся поочередно по всем представлениям с опасными сценариями, аномалиями и т.д., получаем в них все записи, дата которых старше последнего инцидента в физ. таблице
 4. Добавляем эти данные в физ. таблицу, разбивая их на категории
+
+Ссылка на репозиторий с исходным кодом скрипта с инструкцией к нему (README):
+
+Далее будем запускать этот скрипт по рассписанию. Лично я использовал свой личный VDS, добавлял запись в crontab для запуска скрипта раз в час.
+*Уточнение - база данных должна находится в том же хранилище, где и скрипт.*
+
+ Структура физической таблицы будет следующая:
+ - id (integer - primary key)
+ - ts (дата и время)
+ - building (string)
+ - complex (string)
+ - apartment_id (ключ к таблице apartment	)
+ - apartment_no (string)
+ - category (string)
+ - message (string)
