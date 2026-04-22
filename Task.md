@@ -2,7 +2,6 @@
 ## view_resource_consumption_hourly
 так как показания снимаются каждый час, то будем использовать функцию LAG, позволяющая получать предыдущую строку. Будем получать предыдущую строку по device_id и metric_type.code, записывать предыдущее значение в поле prev_value и вычитать из текущего (так мы получим разницу текущего и предыдущего часа)
 ```sql
-
 DROP VIEW IF EXISTS view_resource_consumption_hourly;
 CREATE VIEW view_resource_consumption_hourly AS
 WITH base_cte AS (
@@ -11,7 +10,8 @@ WITH base_cte AS (
 		m.ts,
 		c.name AS complex,
 		b.name AS building,
-		a.apartment_no AS apartment,
+		d.apartment_id,
+		a.apartment_no,
 		mt.code,
 		mt.unit,
 		m.value_num,
@@ -29,7 +29,8 @@ SELECT
 	ts,
 	complex,
 	building,
-	apartment,
+	apartment_id,
+	apartment_no,
 	unit,
 	code,
 	ROUND(
@@ -51,7 +52,8 @@ SELECT
     DATE(ts) AS date,
     complex,
     building,
-    apartment,
+    apartment_id,
+    apartment_no,
     code,
     unit,
     ROUND(SUM(value), 3) AS value
@@ -60,16 +62,18 @@ GROUP BY
     DATE(ts),
     complex,
     building,
-    apartment,
+    apartment_id,
+    apartment_no,
     code,
     unit;
 ```
 
 ## Выявление опасных сценариев энергопотребления при отсутствии движения
-Выявление опасных сценариев высокого потребления электроэнергии при отсутствии движения. Для каждой квартиры выстроим волновую диаграмму потребления электроэнергии с разницой текущего часа и предыдущего. Опасным сценарием будет **пик** в этой диаграмме, когда потребление резко возрасло, но движения в это время не было.
+Выявление опасных сценариев высокого потребления электроэнергии при отсутствии движения. Используя представление `view_resource_consumption_hourly`, с данными о потреблении за прошедший час,  посчитаем процент повышения/понижения потребления.
+Для каждой строки найдем разницу в процентах между текущим и предыдущим значением
 
-Чтобы собрать квартиры будем группировать по ее номеру, комплексу и строению. Далее, отсортируем строки по дате, и для каждой строки будем смотреть предыдущий час. Если разница текущего часа и предыдущего составляется +30% (или иной процент).
 
+**SQL-запрос создания представления с процентами потребления**
 ```sql
 DROP VIEW IF EXISTS view_energy_delta_percent_by_apartment;
 CREATE VIEW view_energy_delta_percent_by_apartment AS
@@ -78,9 +82,10 @@ WITH delta_cte AS (
         ts,
         complex,
         building,
-        apartment,
+        apartment_id,
+        apartment_no,
         value,
-        LAG(value) OVER (PARTITION BY complex, building, apartment ORDER BY ts) AS prev_value
+        LAG(value) OVER (PARTITION BY complex, building, apartment_id, apartment_no ORDER BY ts) AS prev_value
     FROM view_resource_consumption_hourly
     WHERE code = 'electricity_kwh_total'
 )
@@ -88,7 +93,8 @@ SELECT
     ts,
     complex,
     building,
-    apartment,
+    apartment_id,
+    apartment_no,
     CASE 
         WHEN prev_value IS NULL OR prev_value = 0 THEN 0
         ELSE ROUND(((value - prev_value) * 100.0 / prev_value), 2)
@@ -97,4 +103,46 @@ FROM delta_cte
 ```
 
 
-Теперь построим представление, чтобы сопоставить часы и наличие движения в квартире.
+Теперь создадим представление с наличием движения в квартире. *В перспективе лучше сгруппировать так, что если хотя бы в одной из комнат есть движение, то пометим что во всей квартире есть движение. Но посмотрев данные об устройствах этого не требуется, так как на одну квартиру установлено одно устройство*
+```sql
+DROP VIEW IF EXISTS view_motion_detect_by_apartment;
+CREATE VIEW view_motion_detect_by_apartment AS
+WITH base_cte AS (
+    SELECT
+        m.ts,
+        d.apartment_id,
+        a.apartment_no,
+        m.value_bool AS has_motion
+    FROM measurement m
+    JOIN device d ON d.device_id = m.device_id
+    JOIN metric_type mt ON mt.metric_type_id = m.metric_type_id
+    JOIN apartment a ON a.apartment_id = d.apartment_id
+    WHERE mt.code = 'motion_detected'
+)
+SELECT
+    ts,
+    apartment_id,
+    apartment_no,
+    has_motion
+FROM base_cte;
+```
+
+В конце создадим финальное представление. Опасным сценарием будем помечать строки, где потребление выросло на +30 или более процентов и движения в это время не было.
+```sql
+DROP VIEW IF EXISTS view_danger_energy_with_no_motion_scen;
+CREATE VIEW view_danger_energy_with_no_motion_scen AS
+SELECT 
+    venergy.ts,
+    venergy.building,
+    venergy.complex,
+    venergy.apartment_id,
+    venergy.apartment_no,
+    venergy.delta_percent,
+    vmotion.has_motion,
+    CASE
+        WHEN venergy.delta_percent > 30 AND vmotion.has_motion == 0 THEN 1
+        ELSE 0
+    END AS is_danger
+FROM view_energy_delta_percent_by_apartment venergy
+JOIN view_motion_detect_by_apartment vmotion ON vmotion.ts = venergy.ts AND vmotion.apartment_id = venergy.apartment_id
+```
