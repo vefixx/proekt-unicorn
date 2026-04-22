@@ -35,13 +35,13 @@ SELECT
 	apartment_no,
 	unit,
 	code,
-	ROUND(
+	CAST(ROUND(
 		CASE
 			WHEN prev_value IS NULL THEN 0
 			ELSE value_num - prev_value
 		END,
 		3
-	) AS value
+	) AS REAL) AS value
 FROM base_cte;
 ```
 ## Потребление электроэнергии/воды за день
@@ -146,7 +146,7 @@ SELECT
     venergy.complex,
     venergy.apartment_id,
     venergy.apartment_no,
-    venergy.delta_percent,
+    CAST(venergy.delta_percent AS REAL) AS delta_percent,
     vmotion.has_motion,
     CASE
         WHEN venergy.delta_percent > 30 AND vmotion.has_motion == 0 THEN 1
@@ -164,17 +164,18 @@ JOIN view_motion_detect_by_apartment vmotion ON vmotion.ts = venergy.ts AND vmot
 3. Проходимся поочередно по всем представлениям с опасными сценариями, аномалиями и т.д., получаем в них все записи, дата которых старше последнего инцидента в физ. таблице
 4. Добавляем эти данные в физ. таблицу, разбивая их на категории
 
-Ссылка на репозиторий с исходным кодом скрипта с инструкцией к нему (README):
+Ссылка на репозиторий с исходным кодом скрипта с инструкцией к нему (README): https://github.com/vefixx/UnicornDatabaseIncidentJournalScript/tree/master
 
 Далее будем запускать этот скрипт по рассписанию. Лично я использовал свой личный VDS, добавлял запись в crontab для запуска скрипта раз в час.
-*Уточнение - база данных должна находится в том же хранилище, где и скрипт.*
+*Уточнение - база данных должна находится в том же хранилище, где и скрипт (т.е. находиться на одном сервере).*
 
  Структура физической таблицы будет следующая:
- - id (integer - primary key)
+ - incident_id (integer - primary key)
  - ts (дата и время)
+ - building_id (ключ к таблице building)
  - building (string)
  - complex (string)
- - apartment_id (ключ к таблице apartment	)
+ - apartment_id (ключ к таблице apartment)
  - apartment_no (string)
  - category (string)
  - message (string)
