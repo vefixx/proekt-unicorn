@@ -1,4 +1,4 @@
-# Направление 1A
+<img width="823" height="588" alt="image" src="https://github.com/user-attachments/assets/dd538707-1f22-4992-84f6-41114fbc9127" /># Направление 1A
 ## Потребление электроэнергии/воды за час
 так как показания снимаются каждый час, то будем использовать функцию LAG, позволяющая получать предыдущую строку. Будем получать предыдущую строку по device_id и metric_type.code, записывать предыдущее значение в поле prev_value и вычитать из текущего (так мы получим разницу текущего и предыдущего часа)
 ```sql
@@ -179,3 +179,37 @@ JOIN view_motion_detect_by_apartment vmotion ON vmotion.ts = venergy.ts AND vmot
  - apartment_no (string)
  - category (string)
  - message (string)
+
+# Направление 1Б
+## Качество воздуха
+К определению качества воздуха будем относить измерение VOC индекса, CO2 и pm2.5.
+Создадим представление, которое сопоставляет все столбцы, относящиеся к качеству воздуха в помещении. Составим так называемую сводную таблицу, где строки будут столбцами. К базовым столбцам (ts, building_id, complex_id, apartment_id, apartment_no) добавим столбцы voc_index, co2_ppm, pm25_ug_m3 с их соответствующими значениями по квартире и дате.
+```sql
+DROP VIEW IF EXISTS view_air_quality_by_apartment;
+CREATE VIEW view_air_quality_by_apartment AS
+SELECT
+    m.ts,
+    d.building_id,
+    d.apartment_id,
+    a.apartment_no,
+    MAX(m.value_num) FILTER (WHERE mt.code = 'co2_ppm') AS co2_ppm,
+    MAX(m.value_num) FILTER (WHERE mt.code = 'voc_index') AS voc_index,
+    MAX(m.value_num) FILTER (WHERE mt.code = 'pm25_ug_m3') AS pm25_ug_m3
+FROM measurement m
+JOIN metric_type mt ON m.metric_type_id = mt.metric_type_id
+JOIN device d ON m.device_id = d.device_id
+JOIN apartment a ON d.apartment_id = a.apartment_id
+GROUP BY m.ts, d.building_id, d.apartment_id, a.apartment_no
+```
+
+https://atmotube.com/blog/indoor-air-quality-index-iaqi
+
+Теперь составим витрину в виде `MATERIALIZED VIEW`, где будем вычислять IAQI (Indoor Air Quality Index) для каждого значения. В качестве результат возьмем максимальный индекс и сверим с таблицей:
+<img width="823" height="588" alt="image" src="https://github.com/user-attachments/assets/ef118d2f-1cdd-43ce-b887-c3a95be7aaf7" />
+
+В витрине, столбце is_bad_iaqi поставим одно из значений:
+- `Good` (значение 81-100)
+- `Moderate` (значение 61-80)
+- `Polluted` (значение 41-60)
+- `Very Polluted` (значение 21-40)
+- `Severely Polluted` (значение 0-20)
