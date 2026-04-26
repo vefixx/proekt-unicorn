@@ -282,18 +282,39 @@ WITH iaqi_cte AS (
 ),
 iaqi_min_result AS (
     SELECT 
-        ts, building_id, complex_id, apartment_id, apartment_no,
-        co2_iaqi, voc_iaqi, pm25_iaqi,
+        ts,
+		building_id,
+		complex_id,
+		apartment_id,
+		apartment_no,
+        co2_iaqi,
+		voc_iaqi,
+		pm25_iaqi,
         MIN(co2_iaqi, voc_iaqi, pm25_iaqi) AS min_iaqi
     FROM iaqi_cte
 )
 INSERT INTO m_air_quality_status_by_apartment (
-    ts, building_id, complex_id, apartment_id, apartment_no,
-    co2_iaqi, voc_iaqi, pm25_iaqi, min_iaqi, status
+    ts,
+	building_id,
+	complex_id,
+	apartment_id,
+	apartment_no,
+    co2_iaqi,
+	voc_iaqi,
+	pm25_iaqi,
+	min_iaqi,
+	status
 )
 SELECT 
-    ts, building_id, complex_id, apartment_id, apartment_no,
-    co2_iaqi, voc_iaqi, pm25_iaqi, min_iaqi,
+    ts,
+	building_id,
+	complex_id,
+	apartment_id,
+	apartment_no,
+    co2_iaqi,
+	voc_iaqi,
+	pm25_iaqi,
+	min_iaqi,
     CASE 
         WHEN min_iaqi >= 81 THEN 'good'
         WHEN min_iaqi >= 61 THEN 'moderate'
