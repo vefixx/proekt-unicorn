@@ -204,12 +204,102 @@ GROUP BY m.ts, d.building_id, d.apartment_id, a.apartment_no
 
 https://atmotube.com/blog/indoor-air-quality-index-iaqi
 
-Теперь составим витрину в виде `MATERIALIZED VIEW`, где будем вычислять IAQI (Indoor Air Quality Index) для каждого значения. В качестве результат возьмем максимальный индекс и сверим с таблицей:
+Теперь создадим витрину данных, где будем вычислять IAQI (Indoor Air Quality Index) для каждого значения. В качестве результата возьмем минимальный индекс и сверим с таблицей:
 <img width="823" height="588" alt="image" src="https://github.com/user-attachments/assets/ef118d2f-1cdd-43ce-b887-c3a95be7aaf7" />
+<img width="823" height="364" alt="image" src="https://github.com/user-attachments/assets/2681d6c4-6da9-49ac-b348-e17f8ce50a7e" />
 
-В витрине, столбце is_bad_iaqi поставим одно из значений:
-- `Good` (значение 81-100)
-- `Moderate` (значение 61-80)
-- `Polluted` (значение 41-60)
-- `Very Polluted` (значение 21-40)
-- `Severely Polluted` (значение 0-20)
+
+В столбце `status` витрины поставим одно из значений:
+- `good` (значение 81-100)
+- `moderate` (значение 61-80)
+- `polluted` (значение 41-60)
+- `very polluted` (значение 21-40)
+- `severely polluted` (значение 0-20)
+
+
+**Создание таблицы**
+```sql
+CREATE TABLE IF NOT EXISTS m_air_quality_status_by_apartment (
+    ts TEXT,
+    building_id INTEGER,
+    complex_id INTEGER,
+    apartment_id INTEGER,
+    apartment_no TEXT,
+    co2_iaqi REAL,
+    voc_iaqi REAL,
+    pm25_iaqi REAL,
+    min_iaqi REAL,
+    status TEXT,
+    FOREIGN KEY(building_id) REFERENCES building(building_id),
+    FOREIGN KEY(complex_id) REFERENCES complex(complex_id),
+    FOREIGN KEY(apartment_id) REFERENCES apartment(apartment_id)
+)
+```
+
+
+**Заполнение/обновление таблицы**
+```sql
+DELETE FROM m_air_quality_status_by_apartment;
+
+WITH iaqi_cte AS (
+    SELECT
+        vair.ts,
+        vair.building_id,
+        vair.complex_id,
+        vair.apartment_id,
+        vair.apartment_no,
+        ROUND(
+            CASE
+                WHEN vair.co2_ppm <= 599 THEN 100.0 - ((vair.co2_ppm - 400.0) / 199.0) * 19.0
+                WHEN vair.co2_ppm <= 999 THEN 80.0 - ((vair.co2_ppm - 600.0) / 399.0) * 19.0
+                WHEN vair.co2_ppm <= 1499 THEN 60.0 - ((vair.co2_ppm - 1000.0) / 499.0) * 19.0
+                WHEN vair.co2_ppm <= 2499 THEN 40.0 - ((vair.co2_ppm - 1500.0) / 999.0) * 19.0
+                WHEN vair.co2_ppm <= 4000 THEN 20.0 - ((vair.co2_ppm - 2500.0) / 1500.0) * 20.0
+                ELSE 0
+            END, 3
+        ) AS co2_iaqi,
+        ROUND(
+            CASE
+                WHEN vair.voc_index <= 199 THEN 100.0 - ((vair.voc_index - 1.0) / 198.0) * 19.0
+                WHEN vair.voc_index <= 249 THEN 80.0 - ((vair.voc_index - 200.0) / 49.0) * 19.0
+                WHEN vair.voc_index <= 349 THEN 60.0 - ((vair.voc_index - 250.0) / 99.0) * 19.0
+                WHEN vair.voc_index <= 399 THEN 40.0 - ((vair.voc_index - 350.0) / 49.0) * 19.0
+                WHEN vair.voc_index <= 500 THEN 20.0 - ((vair.voc_index - 400.0) / 100.0) * 20.0
+                ELSE 0
+            END, 3
+        ) AS voc_iaqi,
+        ROUND(
+            CASE
+                WHEN vair.pm25_ug_m3 <= 20 THEN 100.0 - (vair.pm25_ug_m3 / 20.0) * 19.0
+                WHEN vair.pm25_ug_m3 <= 50 THEN 80.0 - ((vair.pm25_ug_m3 - 21.0) / 29.0) * 19.0
+                WHEN vair.pm25_ug_m3 <= 90 THEN 60.0 - ((vair.pm25_ug_m3 - 51.0) / 39.0) * 19.0
+                WHEN vair.pm25_ug_m3 <= 140 THEN 40.0 - ((vair.pm25_ug_m3 - 91.0) / 49.0) * 19.0
+                WHEN vair.pm25_ug_m3 <= 200 THEN 20.0 - ((vair.pm25_ug_m3 - 141.0) / 59.0) * 20.0
+                ELSE 0
+            END, 3
+        ) AS pm25_iaqi
+    FROM view_air_quality_by_apartment vair
+),
+iaqi_min_result AS (
+    SELECT 
+        ts, building_id, complex_id, apartment_id, apartment_no,
+        co2_iaqi, voc_iaqi, pm25_iaqi,
+        MIN(co2_iaqi, voc_iaqi, pm25_iaqi) AS min_iaqi
+    FROM iaqi_cte
+)
+INSERT INTO m_air_quality_status_by_apartment (
+    ts, building_id, complex_id, apartment_id, apartment_no,
+    co2_iaqi, voc_iaqi, pm25_iaqi, min_iaqi, status
+)
+SELECT 
+    ts, building_id, complex_id, apartment_id, apartment_no,
+    co2_iaqi, voc_iaqi, pm25_iaqi, min_iaqi,
+    CASE 
+        WHEN min_iaqi >= 81 THEN 'good'
+        WHEN min_iaqi >= 61 THEN 'moderate'
+        WHEN min_iaqi >= 41 THEN 'polluted'
+        WHEN min_iaqi >= 21 THEN 'very polluted'
+        ELSE 'severely polluted'
+    END AS status
+FROM iaqi_min_result;
+```
